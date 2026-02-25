@@ -12,16 +12,44 @@ When the user asks to create a new Java microservice from scratch, generate the 
 ├── gradlew / gradlew.bat
 ├── Dockerfile
 ├── docker-compose.yml
+├── zap-rules.conf                         # OWASP ZAP DAST rules
+├── config/
+│   ├── checkstyle.xml                     # Checkstyle rules
+│   ├── pmd-rules.xml                      # PMD rules
+│   ├── spotbugs-exclude.xml               # SpotBugs exclusion filter
+│   └── dependency-check-suppressions.xml  # OWASP dependency check suppressions
 ├── .github/
-│   └── workflows/
-│       └── ci.yml                    # see references/cicd-github-actions.md
+│   ├── workflows/
+│   │   ├── ci.yml                         # see references/cicd-github-actions.md
+│   │   ├── cd.yml                         # see references/cicd-github-actions.md
+│   │   └── nightly-security.yml           # see references/cicd-github-actions.md
+│   └── actions/
+│       └── deploy/
+│           └── action.yml                 # reusable deploy action
+├── helm/
+│   └── {service}/                         # see references/kubernetes.md
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       ├── values-dev.yaml
+│       ├── values-uat.yaml
+│       ├── values-prod.yaml
+│       └── templates/
+├── k8s/                                   # raw manifests (alternative to Helm)
+│   ├── namespace.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── ingress.yaml
+│   ├── hpa.yaml
+│   └── pdb.yaml
 ├── src/
 │   ├── main/
 │   │   ├── java/com/{org}/{service}/
 │   │   │   ├── Application.java
 │   │   │   ├── config/
 │   │   │   │   ├── AppConfig.java
-│   │   │   │   ├── RedisConfig.java          # if caching enabled
+│   │   │   │   ├── SecurityConfig.java        # see references/security.md
+│   │   │   │   ├── CorsConfig.java
+│   │   │   │   ├── RedisConfig.java           # if caching enabled
 │   │   │   │   ├── KafkaConfig.java           # if messaging enabled
 │   │   │   │   ├── GrpcConfig.java            # if gRPC enabled
 │   │   │   │   └── OpenTelemetryConfig.java   # if observability enabled
@@ -29,6 +57,10 @@ When the user asks to create a new Java microservice from scratch, generate the 
 │   │   │   ├── grpc/
 │   │   │   ├── service/
 │   │   │   ├── repository/
+│   │   │   ├── security/
+│   │   │   │   ├── OrderSecurityService.java  # ownership checks
+│   │   │   │   ├── RateLimitFilter.java       # rate limiting
+│   │   │   │   └── SecurityAuditListener.java # audit logging
 │   │   │   ├── model/
 │   │   │   │   ├── entity/
 │   │   │   │   ├── dto/
@@ -38,6 +70,7 @@ When the user asks to create a new Java microservice from scratch, generate the 
 │   │   │   │   ├── ResourceNotFoundException.java
 │   │   │   │   ├── ErrorResponse.java
 │   │   │   │   └── GlobalExceptionHandler.java
+│   │   │   ├── filter/
 │   │   │   └── util/
 │   │   ├── resources/
 │   │   │   ├── application.yml
@@ -45,20 +78,42 @@ When the user asks to create a new Java microservice from scratch, generate the 
 │   │   │   ├── application-dev.yml
 │   │   │   ├── application-uat.yml
 │   │   │   ├── application-prod.yml
-│   │   │   └── db/migration/           # Flyway migrations (if SQL DB)
-│   │   └── proto/                       # .proto files (if gRPC)
-│   └── test/
-│       ├── java/com/{org}/{service}/
-│       │   ├── controller/
-│       │   ├── service/
-│       │   ├── repository/
-│       │   └── integration/
+│   │   │   └── db/migration/              # Flyway migrations (if SQL DB)
+│   │   └── proto/                          # .proto files (if gRPC)
+│   ├── test/
+│   │   ├── java/com/{org}/{service}/
+│   │   │   ├── controller/                 # MockMvc + @WithMockUser security tests
+│   │   │   ├── service/                    # unit tests (JUnit 5 + Mockito)
+│   │   │   ├── repository/
+│   │   │   └── regression/                 # @Tag("regression") tests
+│   │   └── resources/
+│   │       ├── application-test.yml
+│   │       ├── regression-seed.sql
+│   │       └── regression-cleanup.sql
+│   ├── integrationTest/
+│   │   ├── java/com/{org}/{service}/
+│   │   │   └── integration/                # @SpringBootTest + Testcontainers
+│   │   └── resources/
+│   │       └── application-integrationtest.yml
+│   └── functionalTest/
+│       ├── java/
+│       │   ├── runner/
+│       │   │   └── CucumberTestRunner.java
+│       │   ├── steps/                       # Cucumber step definitions
+│       │   ├── config/
+│       │   │   └── CucumberSpringConfig.java
+│       │   └── api/                         # REST Assured API tests
 │       └── resources/
-│           └── application-test.yml
-├── gatling/                              # see references/gatling-perf.md
+│           ├── features/                    # .feature files (Gherkin)
+│           └── application-functional.yml
+├── gatling/                                 # see references/gatling-perf.md
 │   └── src/
 │       └── gatling/
-│           └── java/
+│           └── java/simulations/
+│               ├── SmokeSuite.java
+│               ├── RegressionSuite.java
+│               ├── OrderApiLoadTest.java
+│               └── StressTest.java
 └── docs/
     └── api.md
 ```
@@ -70,8 +125,16 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.3.5'
     id 'io.spring.dependency-management' version '1.1.6'
+    id 'jacoco'
+    id 'checkstyle'
+    id 'pmd'
+    id 'com.github.spotbugs' version '6.0.18'
+    id 'org.sonarqube' version '5.1.0.4882'
+    id 'org.owasp.dependencycheck' version '10.0.3'
     // Uncomment if using gRPC:
     // id 'com.google.protobuf' version '0.9.4'
+    // Uncomment if using Gatling:
+    // id 'io.gatling.gradle' version '3.11.5.2'
 }
 
 group = 'com.{org}'
@@ -98,6 +161,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // --- Security ---
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 
     // --- Persistence (uncomment what's needed) ---
     // PostgreSQL
@@ -131,16 +198,87 @@ dependencies {
 
     // --- Testing ---
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
     testImplementation 'org.testcontainers:junit-jupiter'
     // testImplementation 'org.testcontainers:postgresql'
     // testImplementation 'org.testcontainers:mongodb'
     // testImplementation 'org.testcontainers:kafka'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // --- Functional / BDD Tests ---
+    // functionalTestImplementation 'io.cucumber:cucumber-java:7.18.1'
+    // functionalTestImplementation 'io.cucumber:cucumber-spring:7.18.1'
+    // functionalTestImplementation 'io.cucumber:cucumber-junit-platform-engine:7.18.1'
+    // functionalTestImplementation 'io.rest-assured:rest-assured:5.4.0'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
     jvmArgs '-XX:+EnableDynamicAgentLoading'  // suppress Mockito byte-buddy warnings on Java 21
+    finalizedBy jacocoTestReport
+}
+
+// --- JaCoCo ---
+jacoco {
+    toolVersion = '0.8.12'
+}
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            element = 'CLASS'
+            excludes = ['*.*Application', '*.config.*', '*.model.*']
+            limits {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.80
+            }
+        }
+    }
+}
+check.dependsOn jacocoTestCoverageVerification
+
+// --- Code quality ---
+checkstyle {
+    toolVersion = '10.18.2'
+    configFile = file('config/checkstyle.xml')
+}
+pmd {
+    toolVersion = '7.5.0'
+    ruleSets = []
+    ruleSetFiles = files('config/pmd-rules.xml')
+}
+spotbugs {
+    effort = 'max'
+    reportLevel = 'medium'
+    excludeFilter = file('config/spotbugs-exclude.xml')
+}
+spotbugsMain.reports {
+    html.required = true
+    xml.required = true
+}
+
+// --- SonarQube ---
+sonar {
+    properties {
+        property 'sonar.projectKey', '{org}_{service}'
+        property 'sonar.host.url', System.getenv('SONAR_HOST_URL') ?: 'https://sonarcloud.io'
+        property 'sonar.organization', '{org}'
+        property 'sonar.coverage.jacoco.xmlReportPaths', 'build/reports/jacoco/test/jacocoTestReport.xml'
+    }
+}
+
+// --- OWASP Dependency Check ---
+dependencyCheck {
+    failBuildOnCVSS = 7.0
+    suppressionFile = 'config/dependency-check-suppressions.xml'
+    formats = ['HTML', 'JSON']
 }
 
 // --- gRPC protobuf compilation (uncomment if using gRPC) ---
