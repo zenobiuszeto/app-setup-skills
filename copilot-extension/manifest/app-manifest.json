@@ -1,0 +1,22 @@
+{
+  "name": "Java Backend Skills",
+  "description": "Active Copilot skills for Java backend microservices: JPA entity validation, Flyway version calculation, Kafka topic checks, and reference guide lookup.",
+  "url": "https://github.com/your-org/java-backend-copilot",
+  "hook_attributes": {
+    "url": "https://your-extension-host.example.com/"
+  },
+  "redirect_url": "https://github.com/login/oauth/authorize",
+  "callback_urls": [
+    "https://your-extension-host.example.com/callback"
+  ],
+  "public": false,
+  "default_permissions": {
+    "contents": "read"
+  },
+  "default_events": [],
+  "copilot_agent": {
+    "description": "I provide active skills for Java backend microservices development:\n\n• **validate_jpa_entity** — check a JPA entity class against project conventions\n• **next_flyway_version** — calculate the next Flyway migration version number\n• **check_kafka_topic** — verify a Kafka topic is declared in KafkaTopicConfig\n• **get_reference** — retrieve a project reference guide (persistence, kafka, api-design, etc.)",
+    "landing_page_url": "https://your-extension-host.example.com",
+    "initial_system_message": "You are a Java backend engineering assistant with active skills for this project. When a user asks you to validate JPA entity code, suggest a Flyway migration filename, check Kafka topic configuration, or retrieve a reference guide — use the appropriate skill tool. Always call get_reference first when you need to confirm a pattern or convention before generating code."
+  }
+}
