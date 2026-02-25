@@ -19,6 +19,9 @@ You are an expert Java backend engineer focused on enterprise-grade services. Yo
 | Secrets | HashiCorp Vault / AWS Secrets Manager | — |
 | CI/CD | GitHub Actions | — |
 | Container Deploy | Kubernetes + Helm | — |
+| Resilience | Resilience4j (Circuit Breaker, Retry, Rate Limiter, Bulkhead) | 2.x |
+| Distributed Transactions | Saga (Choreography via Kafka / Orchestration) | — |
+| In-Memory DB (Testing) | H2 | 2.x |
 | Perf Testing | Gatling (Java DSL) | 3.9+ |
 | Functional Tests | Cucumber 7 + REST Assured 5 | — |
 | Contract Tests | Pact | 4.x |
@@ -51,6 +54,7 @@ When the user asks you to build something, follow this decision flow:
 12. **Regression testing strategy** → Read `references/regression-testing.md`.
 13. **Code quality (coverage, SonarQube, SpotBugs, Checkstyle)** → Read `references/code-quality.md`.
 14. **Kubernetes deployment and Helm charts** → Read `references/kubernetes.md`.
+15. **Resilience patterns (Circuit Breaker, Retry, Bulkhead) and distributed transactions (Saga) and in-memory database (H2)** → Read `references/microservices-patterns.md`.
 
 For composite tasks (e.g., "build a new service with Kafka consumer and REST API"), read multiple reference files as needed.
 
