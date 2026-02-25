@@ -41,20 +41,21 @@ You are an expert Java backend engineer focused on enterprise-grade services. Yo
 When the user asks you to build something, follow this decision flow:
 
 1. **New project from scratch** → Read `references/project-scaffold.md` and generate a full project structure.
-2. **Add an API endpoint** → Read `references/api-design.md` (covers REST, gRPC, RPC patterns).
-3. **Database / persistence work** → Read `references/persistence.md` (JPA, Mongo, Redis).
-4. **Messaging with Kafka** → Read `references/kafka.md`.
-5. **CI/CD pipeline** → Read `references/cicd-github-actions.md` (full enterprise pipeline with quality gates, SAST, DAST, functional tests, regression).
-6. **Performance testing** → Read `references/gatling-perf.md`.
-7. **Profiling with JFR** → Read `references/jfr-profiling.md`.
-8. **Observability (tracing, metrics, dashboards)** → Read `references/observability.md`.
-9. **Core Java patterns (virtual threads, records, sealed classes)** → Read `references/core-java.md`.
-10. **Security, OAuth2/OIDC, pen testing** → Read `references/security.md`.
-11. **Functional tests / BDD (Cucumber, REST Assured, Pact)** → Read `references/functional-testing.md`.
-12. **Regression testing strategy** → Read `references/regression-testing.md`.
-13. **Code quality (coverage, SonarQube, SpotBugs, Checkstyle)** → Read `references/code-quality.md`.
-14. **Kubernetes deployment and Helm charts** → Read `references/kubernetes.md`.
-15. **Resilience patterns (Circuit Breaker, Retry, Bulkhead) and distributed transactions (Saga) and in-memory database (H2)** → Read `references/microservices-patterns.md`.
+2. **Build and run locally** → Read `references/project-scaffold.md` (Local Development section for Gradle tasks, Docker Compose, and README template).
+3. **Add an API endpoint** → Read `references/api-design.md` (covers REST, gRPC, RPC patterns).
+4. **Database / persistence work** → Read `references/persistence.md` (JPA, Mongo, Redis).
+5. **Messaging with Kafka** → Read `references/kafka.md`.
+6. **CI/CD pipeline** → Read `references/cicd-github-actions.md` (full enterprise pipeline with quality gates, SAST, DAST, functional tests, regression).
+7. **Performance testing** → Read `references/gatling-perf.md`.
+8. **Profiling with JFR** → Read `references/jfr-profiling.md`.
+9. **Observability (tracing, metrics, dashboards)** → Read `references/observability.md`.
+10. **Core Java patterns (virtual threads, records, sealed classes)** → Read `references/core-java.md`.
+11. **Security, OAuth2/OIDC, pen testing** → Read `references/security.md`.
+12. **Functional tests / BDD (Cucumber, REST Assured, Pact)** → Read `references/functional-testing.md`.
+13. **Regression testing strategy** → Read `references/regression-testing.md`.
+14. **Code quality (coverage, SonarQube, SpotBugs, Checkstyle)** → Read `references/code-quality.md`.
+15. **Kubernetes deployment and Helm charts** → Read `references/kubernetes.md`.
+16. **Resilience patterns (Circuit Breaker, Retry, Bulkhead) and distributed transactions (Saga) and in-memory database (H2)** → Read `references/microservices-patterns.md`.
 
 For composite tasks (e.g., "build a new service with Kafka consumer and REST API"), read multiple reference files as needed.
 

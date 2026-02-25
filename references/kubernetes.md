@@ -423,6 +423,312 @@ autoscaling:
   maxReplicas: 20
 ```
 
+### values-dev.yaml
+
+```yaml
+# helm/{service}/values-dev.yaml
+replicaCount: 1
+
+environment: dev
+
+ingress:
+  enabled: true
+  hostname: dev.{service}.example.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+```
+
+### values-uat.yaml
+
+```yaml
+# helm/{service}/values-uat.yaml
+replicaCount: 2
+
+environment: uat
+
+ingress:
+  enabled: true
+  hostname: uat.{service}.example.com
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 5
+```
+
+### templates/_helpers.tpl
+
+```
+{{/*
+Expand the name of the chart.
+*/}}
+{{- define "{service}.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Create a default fully qualified app name.
+*/}}
+{{- define "{service}.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "{service}.labels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{ include "{service}.selectorLabels" . }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "{service}.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "{service}.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+```
+
+### templates/deployment.yaml
+
+```yaml
+# helm/{service}/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "{service}.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "{service}.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "{service}.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "{service}.selectorLabels" . | nindent 8 }}
+        version: {{ .Values.image.tag | quote }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: {{ include "{service}.fullname" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.environment | quote }}
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $secret := .Values.secrets }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "{service}.fullname" $ }}-secrets
+                  key: {{ $key }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              {{- include "{service}.selectorLabels" . | nindent 14 }}
+      terminationGracePeriodSeconds: 60
+```
+
+### templates/service.yaml
+
+```yaml
+# helm/{service}/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "{service}.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "{service}.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "{service}.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+  type: ClusterIP
+```
+
+### templates/ingress.yaml
+
+```yaml
+# helm/{service}/templates/ingress.yaml
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "{service}.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "{service}.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: nginx
+  {{- if .Values.ingress.tlsEnabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.hostname }}
+      secretName: {{ include "{service}.fullname" . }}-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.hostname }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "{service}.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}
+```
+
+### templates/hpa.yaml
+
+```yaml
+# helm/{service}/templates/hpa.yaml
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "{service}.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "{service}.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "{service}.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+```
+
+### templates/serviceaccount.yaml
+
+```yaml
+# helm/{service}/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "{service}.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "{service}.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+```
+
+### templates/NOTES.txt
+
+```
+{Service} has been deployed successfully!
+
+Application URL:
+{{- if .Values.ingress.enabled }}
+  https://{{ .Values.ingress.hostname }}
+{{- else }}
+  kubectl port-forward svc/{{ include "{service}.fullname" . }} 8080:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+  Then open: http://localhost:8080
+{{- end }}
+
+Health check:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "{service}.name" . }}
+  curl https://{{ .Values.ingress.hostname }}/actuator/health
+```
+
 ### Helm Commands
 
 ```bash

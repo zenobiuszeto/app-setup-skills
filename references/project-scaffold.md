@@ -13,6 +13,9 @@ When the user asks to create a new Java microservice from scratch, generate the 
 ├── Dockerfile
 ├── docker-compose.yml
 ├── zap-rules.conf                         # OWASP ZAP DAST rules
+├── infra/
+│   ├── prometheus.yml                     # Prometheus scrape config
+│   └── otel-collector-config.yml          # OpenTelemetry Collector config
 ├── config/
 │   ├── checkstyle.xml                     # Checkstyle rules
 │   ├── pmd-rules.xml                      # PMD rules
@@ -116,6 +119,37 @@ When the user asks to create a new Java microservice from scratch, generate the 
 │               └── StressTest.java
 └── docs/
     └── api.md
+```
+
+## settings.gradle
+
+```groovy
+rootProject.name = '{service-name}'
+```
+
+## gradle.properties
+
+```properties
+# Gradle performance
+org.gradle.caching=true
+org.gradle.parallel=true
+org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+
+# Spring Boot dependency management
+springBootVersion=3.3.5
+springDependencyManagementVersion=1.1.6
+```
+
+## gradle/wrapper/gradle-wrapper.properties
+
+```properties
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.10-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
 ```
 
 ## build.gradle (Template)
@@ -347,6 +381,293 @@ logging:
   pattern:
     console: "%d{ISO8601} [%thread] [%X{traceId}] %-5level %logger{36} - %msg%n"
 ```
+
+## zap-rules.conf
+
+```
+# OWASP ZAP scan rules configuration
+# Disable false-positive rules; adjust thresholds as needed
+
+# 10016 - Web Browser XSS Protection Not Enabled — INFO only for APIs
+10016	IGNORE
+
+# 10020 - X-Frame-Options Header Not Set — acceptable for pure APIs
+10020	IGNORE
+
+# 10021 - X-Content-Type-Options Header Missing
+10021	WARN
+
+# 10036 - Server Leaks Version Info via "Server" HTTP Header
+10036	WARN
+
+# 10096 - Timestamp Disclosure
+10096	IGNORE
+
+# 40012 - Cross-Site Scripting (Reflected)
+40012	FAIL
+
+# 40014 - Cross-Site Scripting (Persistent)
+40014	FAIL
+
+# 40018 - SQL Injection
+40018	FAIL
+
+# 90020 - Remote OS Command Injection
+90020	FAIL
+```
+
+## config/dependency-check-suppressions.xml
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!--
+        Add suppressions for known false positives here.
+        Always add a comment explaining why the CVE is suppressed and
+        set an expiry date so suppressions are reviewed periodically.
+    -->
+    <!--
+    <suppress until="2026-01-01Z">
+        <notes>CVE-YYYY-NNNNN: False positive — library not used at runtime.
+               Review again before expiry date.</notes>
+        <packageUrl regex="true">^pkg:maven/com\.example/some\-library@.*$</packageUrl>
+        <cve>CVE-YYYY-NNNNN</cve>
+    </suppress>
+    -->
+</suppressions>
+```
+
+## infra/prometheus.yml
+
+```yaml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: '{service-name}'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['app:8080']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+```
+
+## infra/otel-collector-config.yml
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+
+exporters:
+  debug:
+    verbosity: normal
+  # Uncomment and configure to forward to a tracing backend:
+  # otlp/jaeger:
+  #   endpoint: jaeger:4317
+  #   tls:
+  #     insecure: true
+  # prometheus:
+  #   endpoint: "0.0.0.0:8889"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+```
+
+## README.md (Template)
+
+````markdown
+# {service-name}
+
+Brief description of what this service does and which domain it owns.
+
+## Prerequisites
+
+| Tool | Version |
+|------|---------|
+| Java | 21 |
+| Gradle | 8.x (via wrapper) |
+| Docker + Docker Compose | 24+ |
+| kubectl | 1.30+ (for K8s deploy) |
+| Helm | 3.x (for K8s deploy) |
+
+## Quick Start (Local)
+
+```bash
+# 1. Start all infrastructure (Postgres, Kafka, Redis, Prometheus, Grafana, OTEL Collector)
+docker-compose up -d postgres redis kafka otel-collector
+
+# 2. Run the application
+./gradlew bootRun --args='--spring.profiles.active=local'
+# OR build and run via Docker
+docker-compose up --build app
+```
+
+The service starts on **http://localhost:8080**.
+
+| Endpoint | URL |
+|---|---|
+| Health | http://localhost:8080/actuator/health |
+| API docs (Swagger UI) | http://localhost:8080/swagger-ui.html |
+| Metrics | http://localhost:8080/actuator/prometheus |
+| Grafana | http://localhost:3000 (admin/admin) |
+| Prometheus | http://localhost:9090 |
+
+## Build
+
+```bash
+# Compile + unit tests
+./gradlew build
+
+# Skip tests (faster iteration)
+./gradlew build -x test
+
+# Build Docker image locally
+docker build -t {service-name}:local .
+```
+
+## Test
+
+```bash
+# Unit tests
+./gradlew test
+
+# Integration tests (requires Docker for Testcontainers)
+./gradlew integrationTest
+
+# Regression tests
+./gradlew regressionTest
+
+# Functional / BDD tests (requires a running environment)
+TEST_BASE_URL=http://localhost:8080 ./gradlew functionalTest
+
+# All tests + coverage report
+./gradlew test integrationTest jacocoTestReport
+open build/reports/jacoco/test/html/index.html
+```
+
+## Code Quality
+
+```bash
+# Run all quality checks (Checkstyle, PMD, SpotBugs, JaCoCo)
+./gradlew check
+
+# SonarQube analysis (requires SONAR_TOKEN env var)
+./gradlew sonar
+```
+
+## Deploy
+
+See [`.github/workflows/cd.yml`](.github/workflows/cd.yml) for the full CI/CD pipeline.
+
+Manual deploy via Helm:
+
+```bash
+# Dev
+helm upgrade --install {service-name} helm/{service-name} \
+  --namespace {service-name}-dev --create-namespace \
+  --values helm/{service-name}/values-dev.yaml \
+  --set image.tag=<IMAGE_TAG>
+
+# Production
+helm upgrade --install {service-name} helm/{service-name} \
+  --namespace {service-name} --create-namespace \
+  --values helm/{service-name}/values-prod.yaml \
+  --set image.tag=<IMAGE_TAG>
+```
+
+## Project Structure
+
+```
+src/main/java/com/{org}/{service}/
+├── config/          # Spring @Configuration classes
+├── controller/      # REST controllers
+├── service/         # Business logic
+├── repository/      # Spring Data repositories
+├── security/        # Security beans and filters
+├── model/
+│   ├── entity/      # JPA / Mongo entities
+│   ├── dto/         # Request / response DTOs
+│   └── event/       # Kafka event payloads
+├── mapper/          # Object mappers
+├── exception/       # Custom exceptions + GlobalExceptionHandler
+├── filter/          # Servlet filters
+└── util/            # Shared helpers
+```
+
+## Configuration
+
+| Profile | Purpose |
+|---|---|
+| `local` | Local dev with docker-compose |
+| `dev` | DEV K8s environment |
+| `uat` | UAT K8s environment |
+| `prod` | Production K8s environment |
+
+Secrets are never hardcoded — supply them via environment variables or Vault.
+````
+
+## Local Development — Build and Run
+
+```bash
+# One-time: make Gradle wrapper executable
+chmod +x gradlew
+
+# Start only the infrastructure services needed locally
+docker-compose up -d postgres redis kafka
+
+# Run the app in dev mode (live reload via Spring DevTools if added)
+./gradlew bootRun --args='--spring.profiles.active=local'
+
+# Run the full local stack including the app
+docker-compose up --build
+
+# Tear down
+docker-compose down -v
+```
+
+Useful Gradle tasks during development:
+
+| Task | Description |
+|---|---|
+| `./gradlew build` | Compile, test, and assemble the JAR |
+| `./gradlew build -x test` | Build without tests (faster iteration) |
+| `./gradlew bootRun` | Run the app with Spring Boot devtools |
+| `./gradlew test` | Unit tests only |
+| `./gradlew integrationTest` | Integration tests (needs Docker) |
+| `./gradlew check` | All quality checks (Checkstyle, PMD, SpotBugs, JaCoCo) |
+| `./gradlew dependencyCheckAnalyze` | OWASP dependency vulnerability scan |
+| `./gradlew bootJar` | Build the executable fat JAR only |
 
 ## Dockerfile (Multi-stage)
 
