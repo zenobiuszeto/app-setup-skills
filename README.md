@@ -25,24 +25,29 @@ A workspace that ships **two complementary layers of AI assistance** for Java ba
 │   ├── gatling-perf.md
 │   ├── jfr-profiling.md
 │   └── project-scaffold.md
-└── copilot-extension/            ← active skill server
-    ├── src/
-    │   ├── server.ts             ← Express entry point
-    │   ├── handler.ts            ← agentic loop + SSE streaming
-    │   ├── verify.ts             ← GitHub signature verification
-    │   ├── types.ts              ← shared TypeScript types
-    │   └── skills/
-    │       ├── index.ts          ← tool registry + dispatcher
-    │       ├── validateEntity.ts ← JPA entity validation skill
-    │       ├── nextMigration.ts  ← Flyway version calculator skill
-    │       ├── checkKafkaTopic.ts← Kafka topic config checker skill
-    │       └── getReference.ts   ← reference guide lookup skill
-    ├── manifest/
-    │   └── app-manifest.json     ← GitHub App manifest
-    ├── .env.example
-    ├── package.json
-    ├── tsconfig.json
-    └── README.md                 ← detailed extension setup guide
+└── copilot-extension/            ← active skill server (Spring Boot 3.3 / Java 21)
+    ├── build.gradle
+    ├── settings.gradle
+    ├── Dockerfile
+    ├── src/main/java/com/javabackend/copilot/
+    │   ├── CopilotExtensionApplication.java
+    │   ├── config/ExtensionProperties.java
+    │   ├── controller/CopilotController.java  ← POST / endpoint
+    │   ├── security/GitHubSignatureVerifier.java
+    │   ├── model/  (ChatMessage, ToolCall, ToolDefinition, CopilotPayload)
+    │   └── service/
+    │       ├── AgentHandler.java            ← agentic loop + SSE streaming
+    │       ├── SkillDispatcher.java          ← tool registry + routing
+    │       └── skills/
+    │           ├── ValidateEntitySkill.java     ← JPA entity validation
+    │           ├── NextMigrationSkill.java      ← Flyway version calculator
+    │           ├── CheckKafkaTopicSkill.java    ← Kafka topic config checker
+    │           └── GetReferenceSkill.java       ← reference guide lookup
+    ├── src/main/resources/
+    │   ├── application.yml
+    │   └── application-local.yml
+    ├── manifest/app-manifest.json
+    └── README.md                     ← detailed extension setup guide
 ```
 
 ---
@@ -118,27 +123,24 @@ A **GitHub Copilot Extension** that Copilot calls as tools during agentic chat. 
 
 ### Quick start (local development)
 
-**Prerequisites:** Node.js ≥ 20, [ngrok](https://ngrok.com/)
+**Prerequisites:** Java 21 (use the same JDK as your microservices)
 
 ```bash
-# 1. Install dependencies
+# 1. Build and run the Spring Boot extension server
 cd copilot-extension
-npm install
-
-# 2. Copy and fill in environment variables
-cp .env.example .env
-# → edit .env: set GITHUB_WEBHOOK_SECRET after creating the GitHub App below
+./gradlew bootRun
+# Server starts on http://localhost:3000
 ```
 
-**Terminal 1 — start the ngrok tunnel:**
-```bash
-ngrok http 3000
-# Note the HTTPS URL, e.g. https://abc123.ngrok-free.app
-```
+To make it reachable by GitHub, expose port 3000 publicly:
+- **GitHub Codespaces** (simplest) — open in a Codespace, forward port 3000, set visibility to **Public**
+- **Railway / Render / Fly.io** (free tier) — deploy with `railway up` or equivalent, get a stable URL
+- **Any server / VPS** — copy the JAR and run it
 
-**Terminal 2 — start the extension server:**
+Then set the env var and start:
 ```bash
-npm run dev
+export GITHUB_WEBHOOK_SECRET=your_secret_here
+./gradlew bootRun
 ```
 
 ### Register the GitHub App

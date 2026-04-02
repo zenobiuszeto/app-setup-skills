@@ -1,6 +1,8 @@
 # Java Backend Copilot Extension
 
-A **GitHub Copilot Extension** that exposes active skills for Java backend microservices development. Unlike the passive `copilot-instructions.md` (which injects conventions as prompt context), this extension runs as a live server that Copilot calls at runtime to execute real logic against your code.
+A **GitHub Copilot Extension** built with **Spring Boot 3.3 + Java 21** that exposes active skills for Java backend microservices development. Unlike the passive `copilot-instructions.md` (which injects conventions as prompt context), this extension runs as a live Spring Boot server that Copilot calls at runtime to execute real logic against your code.
+
+Everything here follows the same Java stack used in your microservices — Spring Boot, virtual threads, Lombok, Gradle.
 
 ---
 
@@ -13,11 +15,29 @@ User: "@java-backend validate this entity class"
    GitHub Copilot model
          │ decides to call validate_jpa_entity tool
          ▼
-   POST https://your-host/ (this extension)
-         │ executes skill, returns structured report
+   POST https://your-host/ ← Spring Boot CopilotController
+         │ GitHubSignatureVerifier validates ECDSA signature
+         │ AgentHandler runs the agentic loop
+         │ SkillDispatcher routes to the correct @Service
          ▼
-   Copilot streams the report back to the user
+   Skill @Service executes logic, returns Markdown report
+         │
+         ▼
+   AgentHandler streams SSE back → Copilot → user
 ```
+
+### Spring Boot components
+
+| Class | Role |
+|---|---|
+| `CopilotController` | `POST /` endpoint — verifies signature, opens SSE stream |
+| `GitHubSignatureVerifier` | ECDSA-P256 verification against GitHub's public keys |
+| `AgentHandler` | Agentic loop — calls Copilot API, executes tool calls, streams deltas |
+| `SkillDispatcher` | Routes tool-call names to skill `@Service` beans |
+| `ValidateEntitySkill` | JPA entity static analysis |
+| `NextMigrationSkill` | Flyway version calculator |
+| `CheckKafkaTopicSkill` | Kafka topic config checker |
+| `GetReferenceSkill` | Reference guide reader (filesystem + GitHub API) |
 
 ---
 
@@ -34,70 +54,95 @@ User: "@java-backend validate this entity class"
 
 ## Prerequisites
 
-- Node.js ≥ 20
+- Java 21 (Temurin recommended)
+- Gradle (or use the `./gradlew` wrapper — no install needed)
 - A GitHub account with access to create GitHub Apps
-- [ngrok](https://ngrok.com/) for local development tunnelling
+- A public HTTPS URL for your extension server — any of these work for local dev:
+  - Deploy to a free-tier cloud (Railway, Render, Fly.io) — push once, get a stable URL
+  - Use a reverse proxy you already have
+  - GitHub Codespaces port forwarding (built into VS Code)
 
 ---
 
 ## Local Development Setup
 
-### 1. Install dependencies
+### 1. Build and run the Spring Boot server
 
 ```bash
 cd copilot-extension
-npm install
+
+# Run locally (profile=local auto-sets references-path to ../../references)
+./gradlew bootRun
+
+# Or build a runnable JAR
+./gradlew bootJar
+java -jar build/libs/copilot-extension-1.0.0-SNAPSHOT.jar
 ```
 
-### 2. Configure environment
+The server starts on **port 3000** (`server.port=3000` in `application.yml`).
 
+### 2. Expose the server with a public HTTPS URL
+
+You need a stable public HTTPS URL so GitHub can reach the server. Choose one:
+
+**Option A — GitHub Codespaces (recommended for development)**
+1. Open this repo in a GitHub Codespace
+2. Run `./gradlew bootRun` in the terminal
+3. VS Code will automatically forward port 3000 and show a public URL in the **Ports** tab
+4. Right-click the port → **Port Visibility → Public**
+
+**Option B — Deploy to Railway / Render / Fly.io (free tier)**
 ```bash
-cp .env.example .env
-# Edit .env — fill in GITHUB_WEBHOOK_SECRET after creating the GitHub App below
+# Railway example — from copilot-extension/ folder
+railway init && railway up
+# Returns: https://java-backend-copilot-extension-production.up.railway.app
 ```
 
-### 3. Start ngrok tunnel
-
+**Option C — Any server / VPS you already have**
 ```bash
-ngrok http 3000
-# Note the HTTPS forwarding URL, e.g. https://abc123.ngrok-free.app
+# Copy the JAR and run it
+scp build/libs/*.jar user@yourserver:/opt/copilot-extension/
+ssh user@yourserver "java -DGITHUB_WEBHOOK_SECRET=xxx -jar /opt/copilot-extension/app.jar"
+```
+
+### 3. Set environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GITHUB_WEBHOOK_SECRET` | ✅ | From your GitHub App settings |
+| `REFERENCES_PATH` | optional | Absolute path to `references/` folder. Default: `../../references` |
+| `GITHUB_REPO` | optional | `owner/repo` — enables GitHub API fallback for `get_reference` |
+
+For local dev, set them in `application-local.yml` or as env vars:
+```bash
+export GITHUB_WEBHOOK_SECRET=your_secret_here
+./gradlew bootRun
 ```
 
 ### 4. Create the GitHub App
 
 1. Go to **GitHub → Settings → Developer settings → GitHub Apps → New GitHub App**
 2. Fill in:
-   - **GitHub App name**: `Java Backend Skills (dev)`
-   - **Homepage URL**: your ngrok URL
-   - **Webhook URL**: `https://<ngrok-url>/`
-   - **Webhook secret**: a random string (copy it into `.env` as `GITHUB_WEBHOOK_SECRET`)
+   - **GitHub App name**: `Java Backend Skills`
+   - **Homepage URL**: your public server URL
+   - **Webhook URL**: `https://<your-public-url>/`
+   - **Webhook secret**: a random string → set as `GITHUB_WEBHOOK_SECRET`
 3. Under **Permissions → Account permissions → Copilot Chat**: set to **Read**
-4. Under **Where can this GitHub App be installed?**: **Only on this account**
-5. Click **Create GitHub App**
+4. Click **Create GitHub App**
 
 ### 5. Enable the Copilot Extension
 
-1. On the GitHub App page → **Copilot** tab
+1. GitHub App page → **Copilot** tab
 2. Set **App type** to **Agent**
-3. Set **URL** to your ngrok URL
-4. Paste `manifest/app-manifest.json` content into the description fields
+3. Set **URL** to your public server URL
+4. Paste content from `manifest/app-manifest.json` into the description fields
 5. Save
 
 ### 6. Install the app on your account
 
 GitHub App page → **Install App** → select your account or org
 
-### 7. Start the extension server
-
-```bash
-# Development (watch mode)
-npm run dev
-
-# Production build
-npm run build && npm start
-```
-
-### 8. Test in Copilot Chat
+### 7. Test in Copilot Chat
 
 In VS Code Copilot Chat, type:
 ```
@@ -113,67 +158,49 @@ public class Order { ... }
 
 ## Production Deployment
 
-### Environment variables
+### Docker
 
-| Variable | Required | Description |
-|---|---|---|
-| `GITHUB_WEBHOOK_SECRET` | ✅ | From your GitHub App settings |
-| `PORT` | optional | Default: `3000` |
-| `REFERENCES_PATH` | optional | Absolute path to `references/` folder |
-| `GITHUB_REPO` | optional | `owner/repo` — enables GitHub API fallback for `get_reference` |
-
-### Using Docker
-
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --production
-COPY dist/ dist/
-COPY ../references/ references/
-ENV REFERENCES_PATH=/app/references
-EXPOSE 3000
-CMD ["node", "dist/server.js"]
-```
-
-Build and run:
+A `Dockerfile` (multi-stage, Eclipse Temurin 21) is included in this folder.
 
 ```bash
-npm run build
+# From copilot-extension/ directory
+./gradlew bootJar
 docker build -t java-backend-copilot-extension .
 docker run -p 3000:3000 \
   -e GITHUB_WEBHOOK_SECRET=your_secret \
+  -e REFERENCES_PATH=/app/references \
+  -v /path/to/your/references:/app/references:ro \
   java-backend-copilot-extension
 ```
 
 ### Update GitHub App webhook URL
 
-After deploying, update the **Webhook URL** in your GitHub App settings to point to your production host.
+After deploying, update the **Webhook URL** in your GitHub App settings to point to your production host URL.
 
 ---
 
 ## Request Flow (Technical)
 
 ```
-1. GitHub  → POST /  (with X-GitHub-Public-Key-Signature + X-GitHub-Token)
-2. verify.ts  → ECDSA signature verified against GitHub's public key
-3. handler.ts → SSE stream opened; sseAck() sent
-4. agentLoop  → messages + TOOL_DEFINITIONS sent to api.githubcopilot.com
-5. Model       → returns finish_reason: "tool_calls" with skill name + args
-6. skills/     → skill function executed locally
-7. agentLoop  → tool result appended to messages; loop repeats
-8. Model       → returns final text answer
-9. handler.ts → sseText() chunks proxied to GitHub; sseDone() closes stream
+1. GitHub           → POST /  (X-GitHub-Public-Key-Signature + X-GitHub-Token)
+2. CopilotController → GitHubSignatureVerifier.verify() — ECDSA-P256 check
+3. CopilotController → opens SSE PrintWriter, calls AgentHandler.stream()
+4. AgentHandler      → POST messages + SkillDispatcher.TOOL_DEFINITIONS to Copilot API
+5. Copilot model     → finish_reason="tool_calls" with skill name + JSON args
+6. AgentHandler      → SkillDispatcher.execute(skillName, args) → @Service skill
+7. AgentHandler      → appends tool result to messages; loop repeats (max 5×)
+8. Copilot model     → returns final text answer (content delta stream)
+9. AgentHandler      → proxies SSE content deltas to PrintWriter → GitHub → user
 ```
 
 ---
 
 ## Extending with New Skills
 
-1. Create `src/skills/myNewSkill.ts` — export a function that takes `(args) => string`
-2. Add the `ToolDefinition` entry to `src/skills/index.ts` → `TOOL_DEFINITIONS`
-3. Add the `case 'my_new_skill':` branch to `executeTool()` in `src/skills/index.ts`
-4. Rebuild and redeploy
+1. Create `src/main/java/com/javabackend/copilot/service/skills/MyNewSkill.java` — annotate with `@Service`, implement your logic, return a `String` (Markdown).
+2. Add a `ToolDefinition` entry to `SkillDispatcher.TOOL_DEFINITIONS`.
+3. Inject `MyNewSkill` into `SkillDispatcher` via `@RequiredArgsConstructor` and add a `case "my_new_skill":` branch in `execute()`.
+4. Run `./gradlew bootJar` and redeploy.
 
 ---
 
